@@ -1,0 +1,24 @@
+spring:
+  application:
+    name: complaint
+  data:
+    mongodb:
+      host: ${MONGODB_HOST:localhost}
+      port: ${MONGODB_PORT:27017}
+      database: ${MONGODB_DATABASE:complaints}
+      username: ${MONGODB_USERNAME:}
+      password: ${MONGODB_PASSWORD:}
+      authentication-database: ${MONGODB_AUTH_DATABASE:admin}
+
+application:
+  geolocation:
+    base-url: https://api.ipgeolocation.io
+    api-key: ${GEOLOCATION_API_KEY}
+    endpoint: /ipgeo
+    retry:
+      max-attempts: 3
+      backoff-ms: 1000
+
+logging:
+  level:
+    com.empik.complaint: INFO
