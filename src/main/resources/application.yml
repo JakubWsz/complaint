@@ -9,7 +9,7 @@ spring:
 
 application:
   geolocation:
-    base-url: http://ip-api.com
+    base-url: ${APPLICATION_GEOLOCATION_BASE_URL}
     retry:
       max-attempts: 3
       backoff-ms: 1000
