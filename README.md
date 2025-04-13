@@ -77,7 +77,7 @@ Export manually or use a `.env` file.
 
 Swagger UI:
 ```
-http://localhost:8080/swagger-ui.html
+http://localhost:8080/complaint/swagger-ui/index.html
 ```
 
 ---
