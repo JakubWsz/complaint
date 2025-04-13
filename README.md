@@ -108,6 +108,3 @@ Run unit/integration tests:
 > The goal was to implement a REST service for managing customer complaints. Each complaint is unique by `productId` and `complainantId`. If a duplicate is submitted, the complaint counter is incremented. Country is auto-detected from the client's IP using a public geolocation API (https://ip-api.com/).
 
 ---
-
-📎 _Project repository:_ **[INSERT LINK TO GITHUB]**
-
