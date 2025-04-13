@@ -2,8 +2,10 @@ package com.empik.complaint.service;
 
 import com.empik.complaint.api.dto.ComplaintCreateRequest;
 import com.empik.complaint.client.GeoLocationClient;
+import com.empik.complaint.exception.ComplaintNotFoundException;
 import com.empik.complaint.model.Complaint;
 import com.empik.complaint.repository.ComplaintRepository;
+import com.mongodb.DuplicateKeyException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -18,6 +20,7 @@ import java.time.LocalDateTime;
 public class ComplaintService {
 
 	private static final String UNKNOWN_COUNTRY = "Unknown";
+
 	private final ComplaintRepository complaintRepository;
 	private final GeoLocationClient geoLocationClient;
 
@@ -27,15 +30,14 @@ public class ComplaintService {
 
 		return complaintRepository.findByProductIdAndComplainantId(request.productId(), request.complainantId())
 				.flatMap(this::incrementComplaintCounter)
-				.switchIfEmpty(createNewComplaint(request, ipAddress));
+				.switchIfEmpty(Mono.defer(() -> handleNewComplaint(request, ipAddress)));
 	}
 
 	public Mono<Complaint> updateComplaintContent(String id, String content, String ipAddress) {
 		log.debug("Updating content for complaint ID: {}", id);
 
 		return complaintRepository.findById(id)
-				.flatMap(complaint -> enrichCountryIfUnknown(complaint, ipAddress)
-						.flatMap(updatedComplaint -> updateComplaintContent(updatedComplaint, content)))
+				.flatMap(complaint -> enrichAndApplyContentUpdate(complaint, content, ipAddress))
 				.doOnNext(updated -> log.debug("Updated complaint ID: {}", updated.getId()))
 				.switchIfEmpty(complaintNotFound(id));
 	}
@@ -58,25 +60,21 @@ public class ComplaintService {
 		return complaintRepository.save(existingComplaint);
 	}
 
-	private Mono<Complaint> createNewComplaint(ComplaintCreateRequest request, String ipAddress) {
-		return geoLocationClient.getCountryFromIp(ipAddress)
-				.flatMap(country -> {
-					Complaint complaint = Complaint.builder()
-							.productId(request.productId())
-							.content(request.content())
-							.complainantId(request.complainantId())
-							.country(country)
-							.build();
-					return complaintRepository.save(complaint)
-							.doOnSuccess(saved -> log.info("New complaint saved with ID: {}", saved.getId()));
-				});
+	private Mono<Complaint> enrichAndApplyContentUpdate(Complaint complaint, String content, String ipAddress) {
+		return enrichCountryIfUnknown(complaint, ipAddress)
+				.flatMap(enrichedComplaint -> applyContentUpdate(enrichedComplaint, content));
+	}
+
+	private Mono<Complaint> applyContentUpdate(Complaint complaint, String content) {
+		complaint.setContent(content);
+		complaint.setUpdateDate(LocalDateTime.now());
+		return complaintRepository.save(complaint);
 	}
 
 	private Mono<Complaint> enrichCountryIfUnknown(Complaint complaint, String ipAddress) {
 		if (!UNKNOWN_COUNTRY.equalsIgnoreCase(complaint.getCountry())) {
 			return Mono.just(complaint);
 		}
-
 		return geoLocationClient.getCountryFromIp(ipAddress)
 				.map(country -> {
 					if (!UNKNOWN_COUNTRY.equalsIgnoreCase(country)) {
@@ -87,13 +85,29 @@ public class ComplaintService {
 				});
 	}
 
-	private Mono<Complaint> updateComplaintContent(Complaint complaint, String content) {
-		complaint.setContent(content);
-		complaint.setUpdateDate(LocalDateTime.now());
-		return complaintRepository.save(complaint);
+	private Mono<Complaint> handleNewComplaint(ComplaintCreateRequest request, String ipAddress) {
+		return geoLocationClient.getCountryFromIp(ipAddress)
+				.flatMap(country -> saveNewComplaint(request, country));
+	}
+
+	private Mono<Complaint> saveNewComplaint(ComplaintCreateRequest request, String country) {
+		Complaint newComplaint = Complaint.builder()
+				.productId(request.productId())
+				.content(request.content())
+				.complainantId(request.complainantId())
+				.country(country)
+				.build();
+
+		return complaintRepository.save(newComplaint)
+				.doOnSuccess(saved -> log.info("New complaint saved with ID: {}", saved.getId()))
+				.onErrorResume(DuplicateKeyException.class, e -> {
+					log.debug("DuplicateKeyException caught, complaint already exists, incrementing counter");
+					return complaintRepository.findByProductIdAndComplainantId(request.productId(), request.complainantId())
+							.flatMap(this::incrementComplaintCounter);
+				});
 	}
 
 	private Mono<Complaint> complaintNotFound(String id) {
-		return Mono.error(new RuntimeException("Complaint not found with ID: " + id));
+		return Mono.error(new ComplaintNotFoundException("Complaint not found with ID: " + id));
 	}
 }

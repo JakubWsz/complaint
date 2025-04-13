@@ -14,6 +14,7 @@ import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
 
+import static java.util.Objects.nonNull;
 import static java.util.Objects.requireNonNull;
 
 @RestController
@@ -61,8 +62,14 @@ public class ComplaintController implements ComplaintApi {
 	}
 
 	private static String resolveIpAddress(ServerWebExchange exchange) {
-		String ipAddress = requireNonNull(exchange.getRequest().getRemoteAddress())
-				.getAddress().getHostAddress();
+		String forwardedFor = exchange.getRequest()
+				.getHeaders()
+				.getFirst("X-Forwarded-For");
+
+		String ipAddress = nonNull(forwardedFor)
+				? forwardedFor
+				: requireNonNull(exchange.getRequest().getRemoteAddress()).getAddress().getHostAddress();
+
 		log.debug("Request from IP: {}", ipAddress);
 		return ipAddress;
 	}

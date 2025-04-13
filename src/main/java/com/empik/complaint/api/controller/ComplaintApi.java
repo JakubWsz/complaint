@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
@@ -20,12 +21,14 @@ public interface ComplaintApi {
 
 	@Operation(summary = "Create a new complaint")
 	@PostMapping
+	@ResponseStatus(HttpStatus.CREATED)
 	Mono<ComplaintResponse> createComplaint(
 			@Valid @RequestBody ComplaintCreateRequest request,
 			ServerWebExchange exchange);
 
 	@Operation(summary = "Update complaint content by ID")
 	@PutMapping("/{id}/content")
+	@ResponseStatus(HttpStatus.OK)
 	Mono<ComplaintResponse> updateComplaintContent(
 			@PathVariable String id,
 			@RequestParam String content,
@@ -33,10 +36,12 @@ public interface ComplaintApi {
 
 	@Operation(summary = "Get a complaint by ID")
 	@GetMapping("/{id}")
+	@ResponseStatus(HttpStatus.OK)
 	Mono<ComplaintResponse> getComplaintById(@PathVariable String id);
 
 	@Operation(summary = "List complaints with optional filters and pagination")
 	@GetMapping
+	@ResponseStatus(HttpStatus.OK)
 	Flux<ComplaintFullResponse> getComplaints(
 			@RequestParam(required = false) String productId,
 			@RequestParam(required = false) String complainantId,

@@ -1,6 +1,8 @@
 package com.empik.complaint.api.controller
 
 import com.empik.complaint.api.dto.ComplaintCreateRequest
+import com.empik.complaint.api.dto.ComplaintFullResponse
+import com.empik.complaint.api.dto.ComplaintResponse
 import com.empik.complaint.client.GeoLocationClient
 import com.empik.complaint.model.Complaint
 import com.empik.complaint.repository.ComplaintRepository
@@ -29,9 +31,16 @@ class ComplaintControllerTest extends Specification {
     @Container
     static MongoDBContainer mongoDBContainer = new MongoDBContainer(DockerImageName.parse("mongo:5.0.9"))
 
+    private static final String TEST_IP_ADDRESS = "192.168.1.100"
+
     @DynamicPropertySource
     static void setProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.data.mongodb.uri", mongoDBContainer::getReplicaSetUrl)
+        registry.add("spring.data.mongodb.uri", () -> {
+            if (!mongoDBContainer.isRunning()) {
+                mongoDBContainer.start()
+            }
+            return mongoDBContainer.getReplicaSetUrl()
+        })
     }
 
     @Autowired
@@ -56,17 +65,24 @@ class ComplaintControllerTest extends Specification {
         def response = webTestClient.post()
                 .uri("/api/v1/complaints")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header("X-Forwarded-For", TEST_IP_ADDRESS)
                 .bodyValue(request)
                 .exchange()
 
         then:
-        response.expectStatus().isOk()
-                .expectBody()
-                .jsonPath('$.productId').isEqualTo("product-123")
-                .jsonPath('$.content').isEqualTo("Product is broken")
-                .jsonPath('$.complainantId').isEqualTo("customer-456")
-                .jsonPath('$.country').isEqualTo("Poland")
-                .jsonPath('$.counter').isEqualTo(1)
+        response.expectStatus().isCreated()
+                .expectBody(ComplaintResponse.class)
+                .consumeWith { result ->
+                    def body = result.getResponseBody()
+                    assert body.productId() == "product-123"
+                    assert body.content() == "Product is broken"
+                    assert body.country() == "Poland"
+                }
+
+        and: "complaint should be saved in database"
+        def complaint = complaintRepository.findByProductIdAndComplainantId("product-123", "customer-456").block()
+        complaint != null
+        complaint.counter == 1
     }
 
     def "should increment counter when creating a duplicate complaint"() {
@@ -87,16 +103,22 @@ class ComplaintControllerTest extends Specification {
         def response = webTestClient.post()
                 .uri("/api/v1/complaints")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header("X-Forwarded-For", TEST_IP_ADDRESS)
                 .bodyValue(request)
                 .exchange()
 
         then:
-        response.expectStatus().isOk()
-                .expectBody()
-                .jsonPath('$.productId').isEqualTo("product-123")
-                .jsonPath('$.content').isEqualTo("Original content") // Content should not change
-                .jsonPath('$.complainantId').isEqualTo("customer-456")
-                .jsonPath('$.counter').isEqualTo(2) // Counter should be incremented
+        response.expectStatus().isCreated()
+                .expectBody(ComplaintResponse.class)
+                .consumeWith { result ->
+                    def body = result.getResponseBody()
+                    assert body.productId() == "product-123"
+                    assert body.content() == "Original content"
+                }
+
+        and: "counter should be incremented (check in database)"
+        def updatedComplaint = complaintRepository.findByProductIdAndComplainantId("product-123", "customer-456").block()
+        updatedComplaint.counter == 2
     }
 
     def "should update complaint content"() {
@@ -114,15 +136,18 @@ class ComplaintControllerTest extends Specification {
         when:
         def response = webTestClient.put()
                 .uri("/api/v1/complaints/${savedComplaint.id}/content?content=Updated content")
+                .header("X-Forwarded-For", TEST_IP_ADDRESS)
                 .exchange()
 
         then:
         response.expectStatus().isOk()
-                .expectBody()
-                .jsonPath('$.productId').isEqualTo("product-123")
-                .jsonPath('$.content').isEqualTo("Updated content")
-                .jsonPath('$.complainantId').isEqualTo("customer-456")
-                .jsonPath('$.updateDate').isNotEmpty()
+                .expectBody(ComplaintResponse.class)
+                .consumeWith { result ->
+                    def body = result.getResponseBody()
+                    assert body.productId() == "product-123"
+                    assert body.content() == "Updated content"
+                    assert body.updateDate() != null
+                }
     }
 
     def "should get complaint by id"() {
@@ -144,14 +169,17 @@ class ComplaintControllerTest extends Specification {
 
         then:
         response.expectStatus().isOk()
-                .expectBody()
-                .jsonPath('$.productId').isEqualTo("product-123")
-                .jsonPath('$.content').isEqualTo("Test content")
-                .jsonPath('$.complainantId').isEqualTo("customer-456")
+                .expectBody(ComplaintResponse.class)
+                .consumeWith { result ->
+                    def body = result.getResponseBody()
+                    assert body.productId() == "product-123"
+                    assert body.content() == "Test content"
+                }
     }
 
     def "should get complaints with filters"() {
-        given:def now = LocalDateTime.now()
+        given:
+        def now = LocalDateTime.now()
         def complaint1 = Complaint.builder()
                 .productId("product-123")
                 .content("Content 1")
@@ -188,7 +216,7 @@ class ComplaintControllerTest extends Specification {
 
         then:
         response1.expectStatus().isOk()
-                .expectBodyList()
+                .expectBodyList(ComplaintFullResponse.class)
                 .hasSize(2)
 
         when: "filter by complainantId"
@@ -198,7 +226,7 @@ class ComplaintControllerTest extends Specification {
 
         then:
         response2.expectStatus().isOk()
-                .expectBodyList()
+                .expectBodyList(ComplaintFullResponse.class)
                 .hasSize(2)
 
         when: "filter by productId and complainantId"
@@ -208,7 +236,7 @@ class ComplaintControllerTest extends Specification {
 
         then:
         response3.expectStatus().isOk()
-                .expectBodyList()
+                .expectBodyList(ComplaintFullResponse.class)
                 .hasSize(1)
 
         when: "filter by date range"
@@ -222,8 +250,14 @@ class ComplaintControllerTest extends Specification {
 
         then:
         response4.expectStatus().isOk()
-                .expectBodyList()
+                .expectBodyList(ComplaintFullResponse.class)
                 .hasSize(2)
+                .consumeWith { result ->
+                    def bodies = result.getResponseBody()
+                    bodies.each { body ->
+                        assert body.creationDate() >= now.minusDays(3)
+                    }
+                }
     }
 
     def "should return error when complaint not found"() {
@@ -233,6 +267,11 @@ class ComplaintControllerTest extends Specification {
                 .exchange()
 
         then:
-        response.expectStatus().is5xxServerError()
+        response.expectStatus().isNotFound()
+                .expectBody()
+                .jsonPath('$.status').isEqualTo(404)
+                .jsonPath('$.error').isEqualTo("Not Found")
+                .jsonPath('$.message').isEqualTo("Complaint not found with ID: non-existent-id")
+                .jsonPath('$.exceptionType').isEqualTo("ComplaintNotFoundException")
     }
 }

@@ -3,18 +3,13 @@ spring:
     name: complaint
   data:
     mongodb:
-      host: ${MONGODB_HOST:localhost}
-      port: ${MONGODB_PORT:27017}
-      database: ${MONGODB_DATABASE:complaints}
-      username: ${MONGODB_USERNAME:}
-      password: ${MONGODB_PASSWORD:}
-      authentication-database: ${MONGODB_AUTH_DATABASE:admin}
+      uri: mongodb://${MONGODB_USERNAME:}:${MONGODB_PASSWORD:}@${MONGODB_HOST:localhost}:${MONGODB_PORT:27017}/${MONGODB_DATABASE:complaints}?authSource=${MONGODB_AUTH_DATABASE:admin}
+  webflux:
+    base-path: /complaint
 
 application:
   geolocation:
-    base-url: https://api.ipgeolocation.io
-    api-key: ${GEOLOCATION_API_KEY}
-    endpoint: /ipgeo
+    base-url: http://ip-api.com
     retry:
       max-attempts: 3
       backoff-ms: 1000
