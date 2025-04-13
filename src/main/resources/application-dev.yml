@@ -1,12 +1,7 @@
 spring:
   data:
     mongodb:
-      host: localhost
-      port: 27017
-      database: complaints
-      username:
-      password:
-      authentication-database: admin
+      uri: mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@localhost:27017/complaints?authSource=admin
 
 springdoc:
   api-docs:

@@ -21,8 +21,8 @@ class ComplaintServiceTest extends Specification {
     ComplaintService complaintService
 
     def setup() {
-        complaintRepository = GroovyMock(ComplaintRepository)
-        geoLocationClient = GroovyMock(GeoLocationClient)
+        complaintRepository = Mock(ComplaintRepository)
+        geoLocationClient = Mock(GeoLocationClient)
         complaintService = new ComplaintService(complaintRepository, geoLocationClient)
     }
 
@@ -40,13 +40,14 @@ class ComplaintServiceTest extends Specification {
                 .counter(1)
                 .build()
 
-        complaintRepository.findByProductIdAndComplainantId(_ as String, _ as String) >> { String prodId, String compId ->
-            if (prodId == "product-123" && compId == "customer-456") {
-                return Mono.just(existingComplaint)
-            }
-            return Mono.empty()
+
+        1 * complaintRepository.findByProductIdAndComplainantId("product-123", "customer-456") >> Mono.just(existingComplaint)
+
+        1 * complaintRepository.save(_ as Complaint) >> { Complaint savedComplaint ->
+            Mono.just(savedComplaint)
         }
-        complaintRepository.save(_ as Complaint) >> { Complaint complaint -> Mono.just(complaint) }
+
+        0 * geoLocationClient.getCountryFromIp(_)
 
         when:
         def result = complaintService.createComplaint(request, ipAddress)
@@ -62,27 +63,23 @@ class ComplaintServiceTest extends Specification {
                     assert complaint.id == "existing-id"
                 })
                 .verifyComplete()
-
-        1 * complaintRepository.findByProductIdAndComplainantId("product-123", "customer-456")
-        1 * complaintRepository.save(_ as Complaint)
-        0 * geoLocationClient.getCountryFromIp(_)
     }
 
     def "should create a new complaint when product and complainant combination is new"() {
         given:
         def request = new ComplaintCreateRequest("product-123", "Product is broken", "customer-456")
         def ipAddress = "192.168.1.1"
+        1 *  complaintRepository.findByProductIdAndComplainantId("product-123", "customer-456") >> Mono.empty()
+        1 *   geoLocationClient.getCountryFromIp(ipAddress) >> Mono.just("Poland")
+        1 *  complaintRepository.save(_ as Complaint) >> { Complaint complaint ->
+            complaint.id = "generated-id"
+            return Mono.just(complaint)
+        }
 
         when:
         def result = complaintService.createComplaint(request, ipAddress)
 
         then:
-        1 * complaintRepository.findByProductIdAndComplainantId("product-123", "customer-456") >> Mono.empty()
-        1 * geoLocationClient.getCountryFromIp(ipAddress) >> Mono.just("Poland")
-        1 * complaintRepository.save(_ as Complaint) >> { Complaint complaint ->
-            complaint.id = "generated-id"
-            return Mono.just(complaint)
-        }
 
         StepVerifier.create(result)
                 .assertNext({ complaint ->
@@ -95,6 +92,7 @@ class ComplaintServiceTest extends Specification {
                 })
                 .verifyComplete()
     }
+
 
     def "should update complaint content"() {
         given:
@@ -111,11 +109,11 @@ class ComplaintServiceTest extends Specification {
                 .counter(1)
                 .build()
 
-        complaintRepository.findById(_ as Publisher<String>) >> { String id ->
+        1 *   complaintRepository.findById(_ as String) >> { String id ->
             if (id == complaintId) return Mono.just(existingComplaint)
             return Mono.empty()
         }
-        complaintRepository.save(_ as Complaint) >> { Complaint complaint -> Mono.just(complaint) }
+        1 *  complaintRepository.save(_ as Complaint) >> { Complaint complaint -> Mono.just(complaint) }
 
         when:
         def result = complaintService.updateComplaintContent(complaintId, newContent, ipAddress)
@@ -127,18 +125,13 @@ class ComplaintServiceTest extends Specification {
                     assert nonNull(complaint.updateDate)
                 })
                 .verifyComplete()
-
-        1 * complaintRepository.findById(complaintId)
-        1 * complaintRepository.save({ Complaint complaint ->
-            complaint.content == newContent && nonNull(complaint.updateDate)
-        })
     }
 
     def "should throw error when complaint not found by id"() {
         given:
         def complaintId = "non-existent-id"
 
-        complaintRepository.findById(_) >> { String id ->
+        1 *  complaintRepository.findById(_ as String) >> { String id ->
             return Mono.empty()
         }
 
@@ -152,8 +145,6 @@ class ComplaintServiceTest extends Specification {
                             error.message.contains("Complaint not found with ID: ${complaintId}")
                 })
                 .verify()
-
-        1 * complaintRepository.findById(complaintId)
     }
 
     def "should enrich country if unknown when updating content"() {
@@ -171,15 +162,15 @@ class ComplaintServiceTest extends Specification {
                 .counter(1)
                 .build()
 
-        complaintRepository.findById(_ as Publisher<String>) >> { String id ->
+        1 *   complaintRepository.findById(_ as String) >> { String id ->
             if (id == complaintId) return Mono.just(existingComplaint)
             return Mono.empty()
         }
-        geoLocationClient.getCountryFromIp(_ as String) >> { String ip ->
+        1 *   geoLocationClient.getCountryFromIp(_ as String) >> { String ip ->
             if (ip == ipAddress) return Mono.just("Poland")
             return Mono.just("Unknown")
         }
-        complaintRepository.save(_ as Complaint) >> { Complaint complaint -> Mono.just(complaint) }
+        1 *  complaintRepository.save(_ as Complaint) >> { Complaint complaint -> Mono.just(complaint) }
 
         when:
         def result = complaintService.updateComplaintContent(complaintId, newContent, ipAddress)
@@ -192,14 +183,6 @@ class ComplaintServiceTest extends Specification {
                     assert nonNull(complaint.updateDate)
                 })
                 .verifyComplete()
-
-        1 * complaintRepository.findById(complaintId)
-        1 * geoLocationClient.getCountryFromIp(ipAddress)
-        1 * complaintRepository.save({ Complaint complaint ->
-            complaint.content == newContent &&
-                    complaint.country == "Poland" &&
-                    nonNull(complaint.updateDate)
-        })
     }
 
     def "should not attempt to update country if already known"() {
@@ -217,13 +200,14 @@ class ComplaintServiceTest extends Specification {
                 .counter(1)
                 .build()
 
+        1 * complaintRepository.findById(complaintId) >> Mono.just(existingComplaint)
+        0 * geoLocationClient.getCountryFromIp(_)
+        1 * complaintRepository.save(_ as Complaint) >> { Complaint complaint -> Mono.just(complaint) }
+
         when:
         def result = complaintService.updateComplaintContent(complaintId, newContent, ipAddress)
 
         then:
-        1 * complaintRepository.findById(complaintId) >> Mono.just(existingComplaint)
-        0 * geoLocationClient.getCountryFromIp(_)
-        1 * complaintRepository.save(_ as Complaint) >> { Complaint complaint -> Mono.just(complaint) }
 
         StepVerifier.create(result)
                 .assertNext({ complaint ->
